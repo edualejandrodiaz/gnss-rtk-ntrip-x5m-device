@@ -18,16 +18,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.nio.charset.StandardCharsets;
 import android.util.Base64;
+import com.capacitorjs.plugins.x5m.gnss.contracts.onTcpDataCallback;
 
 /**
  * TcpSocketPlugin - Capacitor plugin that provides TCP Socket communication functionality
  * Supports connection, data sending, data receiving and disconnection operations
  */
-@CapacitorPlugin(
-    name = "TcpSocket",
-    permissions = { @Permission(alias = "network", strings = { Manifest.permission.ACCESS_NETWORK_STATE }) }
-)
-public class TcpSocket extends Plugin {
+
+public class TcpSocket {
     private static final String TAG = "TcpSocketPlugin";
     private List<Socket> clients = new ArrayList<>();
     
@@ -65,26 +63,21 @@ public class TcpSocket extends Plugin {
      * Returns:
      * - client: Client index, used for subsequent operations
      */
-    @PluginMethod
-    public void connect(PluginCall call) {
-        String ipAddress = call.getString("ipAddress");
 
-        if (ipAddress == null || ipAddress.isEmpty()) {
-            call.reject("IP address is required");
-            return;
-        }
-        Integer port = call.getInt("port", 9100);
+    public Integer connect(String ipAddress, Integer port) throws IOException{
+
 
         try {
             Socket socket = new Socket(ipAddress, port);
             clients.add(socket);
             
             JSObject ret = new JSObject();
-            ret.put("client", clients.size() - 1);
-            call.resolve(ret);
+            return clients.size() - 1;
+
         } catch (IOException e) {
+
             Log.e(TAG, "Connection failed: " + e.getMessage());
-            call.reject("Connection failed: " + e.getMessage());
+            throw e;
         }
     }
 
@@ -95,34 +88,38 @@ public class TcpSocket extends Plugin {
      * - data: Data to send
      * - encoding: Data encoding (utf8, base64, hex), default is utf8
      */
-    @PluginMethod
-    public void send(final PluginCall call) {
-        final Integer clientIndex = call.getInt("client", -1);
+
+    public void send(
+            final Integer clientIndex,
+            final String data,
+            final String encodingString,
+            onTcpDataCallback.sendingDataCallback sendingDataCallback) throws RuntimeException {
+
 
         if (clientIndex == -1) {
-            call.reject("Client not specified or invalid index");
-            return;
+            throw new RuntimeException("Client not specified or invalid index");
+
         }
         
         if (clientIndex >= clients.size() || clientIndex < 0) {
-            call.reject("Client index out of range");
-            return;
+            throw new RuntimeException("Client index out of range");
+
         }
         
-        final String data = call.getString("data");
+
         if (data == null || data.isEmpty()) {
-            call.reject("No data provided");
-            return;
+            throw new RuntimeException("No data provided");
+
         }
         
-        final String encodingString = call.getString("encoding", "utf8");
+
         final DataEncoding encoding = DataEncoding.fromString(encodingString);
 
         Socket socket = clients.get(clientIndex);
         if (!socket.isConnected()) {
             closeSocketSafely(socket);
-            call.reject("Socket not connected");
-            return;
+            throw new RuntimeException("Socket not connected");
+
         }
 
         Runnable runnable = new Runnable() {
@@ -150,13 +147,13 @@ public class TcpSocket extends Plugin {
                     if (bytes != null) {
                         bufferOut.write(bytes);
                         bufferOut.flush();
-                        call.resolve();
+                        sendingDataCallback.success(true);
                     } else {
-                        call.reject("Failed to decode data with encoding: " + encodingString);
+                        sendingDataCallback.error("Failed to decode data with encoding: " + encodingString);
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "Send failed: " + e.getMessage());
-                    call.reject("Send failed: " + e.getMessage());
+                    sendingDataCallback.error("Send failed: " + e.getMessage());
                 }
             }
         };
@@ -176,29 +173,35 @@ public class TcpSocket extends Plugin {
      * - result: Data read
      * - encoding: The encoding used for the result
      */
-    @PluginMethod
-    public void read(final PluginCall call) {
-        final Integer clientIndex = call.getInt("client", -1);
-        final Integer length = call.getInt("expectLen", 1024);
+
+    public void read(
+            final Integer clientIndex,
+            final Integer length,
+            final String encodingString,
+            onTcpDataCallback.readingDataCallback readingDataCallback) {
+
 
         if (clientIndex == -1) {
-            call.reject("Client not specified or invalid index");
-            return;
+
+            throw new RuntimeException("Client not specified or invalid index");
+
         }
         
         if (clientIndex >= clients.size() || clientIndex < 0) {
-            call.reject("Client index out of range");
-            return;
+
+            throw new RuntimeException("Client index out of range");
+
         }
 
         Socket socket = clients.get(clientIndex);
+
         if (!socket.isConnected()) {
             closeSocketSafely(socket);
-            call.reject("Socket not connected");
-            return;
+            throw new RuntimeException("Socket not connected");
+
         }
         
-        final String encodingString = call.getString("encoding", "utf8");
+
         final DataEncoding encoding = DataEncoding.fromString(encodingString);
 
         Runnable runnable = new Runnable() {
@@ -237,12 +240,17 @@ public class TcpSocket extends Plugin {
                         }
                     }
                     
-                    ret.put("result", result);
-                    ret.put("encoding", actualEncoding);
-                    call.resolve(ret);
+
+
+                    ResultTpc resultTpc = new ResultTpc(result, actualEncoding);
+
+                    // Devuelve la instancia creada.
+                    readingDataCallback.success(resultTpc);
+
                 } catch (IOException e) {
                     Log.e(TAG, "Read failed: " + e.getMessage());
-                    call.reject("Read failed: " + e.getMessage());
+                    readingDataCallback.error("Read failed: " + e.getMessage());
+
                 }
             }
         };
@@ -258,41 +266,39 @@ public class TcpSocket extends Plugin {
      * Returns:
      * - client: Disconnected client index
      */
-    @PluginMethod
-    public void disconnect(PluginCall call) {
-        final Integer clientIndex = call.getInt("client", -1);
+
+    public Integer disconnect(final Integer clientIndex) throws Exception {
+
         if (clientIndex == -1) {
-            call.reject("Client not specified or invalid index");
-            return;
+            throw new Exception("Client not specified or invalid index");
+
         }
         
         if (clients.isEmpty()) {
-            call.reject("No active connections");
-            return;
+            throw new Exception("No active connections");
+
         }
         
         if (clientIndex >= clients.size() || clientIndex < 0) {
-            call.reject("Client index out of range");
-            return;
+            throw new Exception("Client index out of range");
         }
         
         final Socket socket = clients.get(clientIndex);
         try {
             if (!socket.isConnected()) {
                 socket.close();
-                call.reject("Socket not connected");
-                return;
+                throw new Exception("Socket not connected");
+
             }
             socket.close();
         } catch (IOException e) {
             Log.e(TAG, "Disconnect failed: " + e.getMessage());
-            call.reject("Disconnect failed: " + e.getMessage());
-            return;
+            throw new Exception("Disconnect failed: " + e.getMessage());
+
         }
 
-        JSObject ret = new JSObject();
-        ret.put("client", clientIndex);
-        call.resolve(ret);
+
+        return clientIndex;
     }
     
     /**
@@ -311,13 +317,13 @@ public class TcpSocket extends Plugin {
     /**
      * Clean up resources when plugin is destroyed
      */
-    @Override
-    protected void handleOnDestroy() {
+
+    public void handleOnDestroy() {
         for (Socket socket : clients) {
             closeSocketSafely(socket);
         }
         clients.clear();
-        super.handleOnDestroy();
+
     }
     
     /**

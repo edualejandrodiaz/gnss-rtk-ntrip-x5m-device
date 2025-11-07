@@ -20,6 +20,7 @@ import android.util.Log;
 import androidx.core.app.ActivityCompat;
 
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDataListener;
+import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceCallback;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceListener;
 import com.capacitorjs.plugins.x5m.gnss.contracts.onBluetoothPermissionCallBack;
 
@@ -68,6 +69,7 @@ public class BluetoothSerial  {
     private final List<OnBluetoothDataListener> bluetoothDataListeners = new ArrayList<OnBluetoothDataListener>();
     private onBluetoothPermissionCallBack.BluetoothRequestPermissionCallback requestPermissionCallback;
 
+
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothSerialService bluetoothSerialService;
 
@@ -94,6 +96,15 @@ public class BluetoothSerial  {
     // Android 23 requires user to explicitly grant permission for location to discover unpaired
     private static final String ACCESS_COARSE_LOCATION = Manifest.permission.ACCESS_COARSE_LOCATION;
     private static final int CHECK_PERMISSIONS_REQ_CODE = 2;
+
+
+    public void ini(Context context) {
+        if (bluetoothSerialService == null) {
+            bluetoothSerialService = new BluetoothSerialService(mHandler, context);
+        }
+
+        getAdapter();
+    }
 
 
     public void getAdapter(){
@@ -207,7 +218,7 @@ public class BluetoothSerial  {
         }
     }
 
-    private void listBondedDevices() throws JSONException {
+    public JSONArray listBondedDevices() throws JSONException {
         JSONArray deviceList = new JSONArray();
         Context ctx = bluetoothSerialService.getBluethoothContext();
         if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -218,14 +229,16 @@ public class BluetoothSerial  {
             //                                          int[] grantResults)
             // to handle the case where the user grants the permission. See the documentation
             // for ActivityCompat#requestPermissions for more details.
-            return;
+            return deviceList;
         }
         Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
 
         for (BluetoothDevice device : bondedDevices) {
             deviceList.put(deviceToJSON(device));
         }
-        notifyDeviceDeviceList(deviceList);
+
+        return deviceList;
+        //notifyDeviceDeviceList(deviceList);
     }
 
     private void discoverUnpairedDevices(final onBluetoothPermissionCallBack.BluetoothRequestPermissionCallback callbackContext) throws JSONException {
@@ -275,7 +288,25 @@ public class BluetoothSerial  {
     }
 
     private JSONObject deviceToJSON(BluetoothDevice device) throws JSONException {
+
         JSONObject json = new JSONObject();
+
+        Context ctx = bluetoothSerialService.getBluethoothContext();
+
+        if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+
+
+
+            return new JSONObject();
+
+        }
         json.put("name", device.getName());
         json.put("address", device.getAddress());
         json.put("id", device.getAddress());
@@ -285,7 +316,7 @@ public class BluetoothSerial  {
         return json;
     }
 
-    private void connect(String macAddress, boolean secure) throws JSONException {
+    public void connect(String macAddress, boolean secure, OnBluetoothDeviceCallback.BluetoothDeviceConnectedCallback callbackContext) throws JSONException {
 
         BluetoothDevice device = bluetoothAdapter.getRemoteDevice(macAddress);
 
@@ -294,12 +325,23 @@ public class BluetoothSerial  {
             bluetoothSerialService.connect(device, secure);
             buffer.setLength(0);
 
-            notifyDeviceConnected(true);
+            callbackContext.success(true);
+            //notifyDeviceConnected(true);
 
         } else {
-            notifyDeviceConnected(false);
+            callbackContext.error("Could not connect to " + macAddress);
+            //notifyDeviceConnected(false);
             //callbackContext.error("Could not connect to " + macAddress);
         }
+    }
+
+
+    public void stop(){
+        bluetoothSerialService.stop();
+    }
+
+    public void write(byte[] data){
+        bluetoothSerialService.write(data);
     }
 
     // The Handler that gets information back from the BluetoothSerialService
@@ -312,16 +354,16 @@ public class BluetoothSerial  {
                 case MESSAGE_READ:
                     buffer.append((String)msg.obj);
 
-                    if (dataAvailableCallback != null) {
+
                         sendDataToSubscriber();
-                    }
+
 
                     break;
                 case MESSAGE_READ_RAW:
-                    if (rawDataAvailableCallback != null) {
+
                         byte[] bytes = (byte[]) msg.obj;
                         sendRawDataToSubscriber(bytes);
-                    }
+
                     break;
                 case MESSAGE_STATE_CHANGE:
 

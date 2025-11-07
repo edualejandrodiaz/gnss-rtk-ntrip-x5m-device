@@ -1,6 +1,7 @@
 package com.capacitorjs.plugins.x5m.gnss;
 
 import android.content.BroadcastReceiver;
+import android.content.Context;
 
 import com.capacitorjs.plugins.x5m.gnss.bluetooth.BluetoothSerial;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDataCallback;
@@ -8,14 +9,46 @@ import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDataListener;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceCallback;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceListener;
 import com.capacitorjs.plugins.x5m.gnss.contracts.onBluetoothPermissionCallBack;
+import com.capacitorjs.plugins.x5m.gnss.tcp.TcpSocket;
 import com.getcapacitor.BridgeActivity;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 public class GnssService {
 
     private BluetoothSerial bluetoothSerialManager;
+    private TcpSocket tpcSocket;
+
+
+    public GnssService(){
+        bluetoothSerialManager = new BluetoothSerial();
+    }
+
+    public void iniBluetoothService(Context context){
+        bluetoothSerialManager.ini(context);
+    }
+
+    public JSONArray listBondedBluetoothDevices() throws JSONException {
+        return bluetoothSerialManager.listBondedDevices();
+    }
+
+    public void connectToBluetoothDevice(
+            String macAddress,
+            boolean secure,
+            OnBluetoothDeviceCallback.BluetoothDeviceConnectedCallback callback
+    ) throws JSONException {
+        bluetoothSerialManager.connect(macAddress, secure, callback);
+    }
+
+    public void stopBluetoothDevice(){
+        bluetoothSerialManager.stop();
+    }
+
+    public void writeToBluetoothDevice(byte[] data){
+        bluetoothSerialManager.write(data);
+    }
 
     public void addBluetoothDeviceListeners(
             OnBluetoothDeviceCallback.BluetoothDeviceConnectedCallback connectedCallback,
@@ -132,5 +165,26 @@ public class GnssService {
 
     public void readLmeaData(){
 
+    }
+
+    public void startNtrip(String host, String port, String username, String password, String mountpoint){
+        tpcSocket = new TcpSocket();
+        Integer integer_port = Integer.parseInt(port);
+
+        try {
+            tpcSocket.connect(host, integer_port);
+        } catch (Exception e){
+            e.printStackTrace();
+
+        }
+
+
+    }
+
+
+    public void handleOnDestroy(){
+        if(tpcSocket!=null) {
+            tpcSocket.handleOnDestroy();
+        }
     }
 }
