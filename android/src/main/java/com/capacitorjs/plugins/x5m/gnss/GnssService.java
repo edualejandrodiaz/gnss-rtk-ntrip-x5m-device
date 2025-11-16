@@ -9,6 +9,10 @@ import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDataListener;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceCallback;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceListener;
 import com.capacitorjs.plugins.x5m.gnss.contracts.onBluetoothPermissionCallBack;
+import com.capacitorjs.plugins.x5m.gnss.contracts.onTcpDataCallback;
+
+import com.capacitorjs.plugins.x5m.gnss.tcp.ConnTcpOptions;
+import com.capacitorjs.plugins.x5m.gnss.tcp.ResultTpc;
 import com.capacitorjs.plugins.x5m.gnss.tcp.TcpSocket;
 import com.getcapacitor.BridgeActivity;
 
@@ -16,11 +20,17 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+
+
 public class GnssService {
 
-    private BluetoothSerial bluetoothSerialManager;
+    private final BluetoothSerial bluetoothSerialManager;
     private TcpSocket tpcSocket;
 
+    private float currentLat;
+    private float currentLng;
+
+    private Integer clientIndex;
 
     public GnssService(){
         bluetoothSerialManager = new BluetoothSerial();
@@ -167,18 +177,90 @@ public class GnssService {
 
     }
 
-    public void startNtrip(String host, String port, String username, String password, String mountpoint){
+    public void startNtrip(
+            ConnTcpOptions connTcpOptions,
+            double lat,
+            double lng,
+            onTcpDataCallback.readingDataCallback readingDataCallback,
+            onTcpDataCallback.sendingDataCallback sendingDataCallback
+    ){
+
+        String host = connTcpOptions.getHost();
+        String port = connTcpOptions.getPort();
+
         tpcSocket = new TcpSocket();
+
         Integer integer_port = Integer.parseInt(port);
 
         try {
-            tpcSocket.connect(host, integer_port);
+
+            clientIndex = tpcSocket.connect(host, integer_port);
+
+            authNtrip(connTcpOptions, lat, lng, sendingDataCallback);
+
+            tpcSocket.read(clientIndex, 4096, "utf8", new onTcpDataCallback.readingDataCallback() {
+                @Override
+                public void success(ResultTpc resultTpc) {
+                    byte[] bytes = resultTpc.toBytes();
+                    writeToBluetoothDevice(bytes);
+                    readingDataCallback.success(resultTpc);
+                }
+
+                @Override
+                public void error(String msg) {
+                    readingDataCallback.error(msg);
+                }
+
+            });
+
+
         } catch (Exception e){
             e.printStackTrace();
 
         }
 
 
+    }
+
+    public void stopNtrip() throws Exception {
+
+        tpcSocket.disconnect(clientIndex);
+
+    }
+
+
+    private void authNtrip(
+            ConnTcpOptions connTcpOptions,
+            double lat,
+            double lng,
+            onTcpDataCallback.sendingDataCallback sendingDataCallback
+    ){
+
+        String username = connTcpOptions.getUsername();
+        String password = connTcpOptions.getPassword();
+        String mountpoint = connTcpOptions.getMountpoint();
+
+        String request = Nmea.getAuthRequest(lat,lng,username,password,mountpoint);
+
+        tpcSocket.send(clientIndex, request, "utf8", new onTcpDataCallback.sendingDataCallback() {
+            @Override
+            public void success(boolean v) {
+                sendingDataCallback.success(true);
+            }
+
+            @Override
+            public void error(String msg) {
+                sendingDataCallback.error(msg);
+            }
+        });
+    }
+
+    public double getCurrentLat(){
+        return currentLat;
+    }
+
+    public double getCurrentLng(){
+        return currentLng;
     }
 
 

@@ -15,6 +15,9 @@ import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDataCallback;
 import com.capacitorjs.plugins.x5m.gnss.contracts.OnBluetoothDeviceCallback;
 
 import com.capacitorjs.plugins.x5m.gnss.contracts.onBluetoothPermissionCallBack;
+import com.capacitorjs.plugins.x5m.gnss.contracts.onTcpDataCallback;
+import com.capacitorjs.plugins.x5m.gnss.tcp.ConnTcpOptions;
+import com.capacitorjs.plugins.x5m.gnss.tcp.ResultTpc;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
@@ -29,11 +32,11 @@ import android.Manifest;
 import org.json.JSONArray;
 import org.json.JSONException;
 
-import java.net.Socket;
+
 
 
 @CapacitorPlugin(
-        name = "GnssRtkNtripX5mDevice",
+        name = "GnssNtripDevice",
         permissions = {
                 @Permission(strings = {
                         Manifest.permission.BLUETOOTH_CONNECT,
@@ -45,8 +48,13 @@ public class GnssServicePlugin  extends Plugin {
 
     private final GnssService implementation = new GnssService();
 
+    /**
+     * Initialization GNSS Bluetooth Service
+     *
+     * @param call PluginCall
+     */
     @PluginMethod
-    public void iniGNSSService(PluginCall call){
+    public void iniGnssService(PluginCall call){
 
         String source = call.getString("source");
 
@@ -56,15 +64,17 @@ public class GnssServicePlugin  extends Plugin {
 
             implementation.iniBluetoothService(context);
 
-            readGNSSBluetoothDataListeners();
-
             call.resolve();
         } else {
             call.reject("Invalid source");
         }
     }
 
-
+    /**
+     * Lists bonded devices
+     *
+     * @param call PluginCall
+     */
     @PluginMethod
     public void listSourcesDevices(PluginCall call){
 
@@ -83,7 +93,11 @@ public class GnssServicePlugin  extends Plugin {
         }
     }
 
-
+    /**
+     * Connect to a Bluetooth device.
+     *
+     * @param call PluginCall
+     */
     @PluginMethod
     public void connect(PluginCall call){
 
@@ -91,12 +105,13 @@ public class GnssServicePlugin  extends Plugin {
 
             boolean secure = Boolean.TRUE.equals(call.getBoolean("secure"));
             String macAddress = call.getString("macAddress");
-
             OnBluetoothDeviceCallback.BluetoothDeviceConnectedCallback callback;
 
             callback = new OnBluetoothDeviceCallback.BluetoothDeviceConnectedCallback() {
                 @Override
                 public void success(boolean v) {
+
+                    readGNSSBluetoothDataListeners();
 
                     JSObject ret = new JSObject();
 
@@ -123,6 +138,11 @@ public class GnssServicePlugin  extends Plugin {
 
     }
 
+    /**
+     * Disconnect from GNSS device
+     *
+     * @param call PluginCall
+     */
     @PluginMethod
     public void disconnect(PluginCall call){
 
@@ -131,41 +151,120 @@ public class GnssServicePlugin  extends Plugin {
 
     }
 
+
     /**
-    * host: string,
-     * port: string,
-     * username: string,
-     * password: string,
-     * mountpoint: string
-    */
-
-
+     * Initiates a connection to an NTRIP Caster to receive GNSS correction data.
+     *
+     * This function establishes a network connection to an NTRIP server (Caster), authenticates
+     * (if required), and requests a data stream from a specific mountpoint. Once connected, it
+     * begins receiving correction data (typically in RTCM format) and forwards it to a listener
+     * for processing by the device's GNSS receiver.
+     *
+     * The entire operation is executed asynchronously on a background thread to avoid blocking
+     * the main application thread.
+     *
+     * @param host The IP address or domain name of the NTRIP Caster. For example, "caster.example.com".
+     * @param port The port on which the Caster is listening. This is commonly 2101.
+     * @param mountpoint The specific mountpoint on the Caster that provides the desired correction data stream. For example, "RTCM3_IMAX".
+     * @param username The username for authentication with the Caster. If the mountpoint is public, this parameter can be null or an empty string.
+     * @param password The password corresponding to the username. Can be null or an empty string if no authentication is required.
+     *
+     * @throws IllegalArgumentException If any of the essential parameters (host, port, mountpoint)
+     *                                  are null or invalid.
+     */
     @PluginMethod
     public void startNtrip(PluginCall call){
 
+        String host = call.getString("host");
+        String post = call.getString("port");
+        String username = call.getString("username");
+        String password = call.getString("password");
+        String mountpoint = call.getString("mountpoint");
+
+        ConnTcpOptions connTcpOptions = new ConnTcpOptions(host, post, username, password, mountpoint);
+
+        double lat = implementation.getCurrentLat();
+        double lng = implementation.getCurrentLng();
+
+
+        implementation.startNtrip(
+                connTcpOptions,
+                lat,
+                lng,
+                //receiving ntrip data
+                new onTcpDataCallback.readingDataCallback() {
+                    @Override
+                    public void success(ResultTpc resultTpc) {
+                        JSObject ret = new JSObject();
+                        ret.put("result", resultTpc.getResult());
+                        ret.put("encoding", resultTpc.getEncoding());
+                        call.resolve(ret);
+                    }
+
+                    @Override
+                    public void error(String msg) {
+                        call.reject(msg);
+                    }
+                },
+                //sending auth data result
+                new onTcpDataCallback.sendingDataCallback() {
+                    @Override
+                    public void success(boolean v) {
+                        JSObject ret = new JSObject();
+                        ret.put("value", v);
+                        call.resolve(ret);
+                    }
+
+                    @Override
+                    public void error(String msg) {
+                        call.reject(msg);
+                    }
+                }
+        );
+
     }
+
+    /**
+     * Stop NTRIP
+     *
+     * @param call PluginCall
+     */
+    @PluginMethod
+    public void stopNtrip(PluginCall call){
+        try {
+            implementation.stopNtrip();
+            call.resolve();
+        } catch (Exception e){
+            call.reject(e.getMessage());
+        }
+    }
+
 
     @PluginMethod
-    public void sendNtripData(PluginCall call){
-
-
-        String base64Data = call.getString("data");
-
-        if (base64Data == null) {
-            call.reject("Missing 'data' parameter");
-            return;
+    public void checkPermissions(PluginCall call) {
+        // Check if granted
+        if (getPermissionState("bluetooth") == PermissionState.GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+        } else {
+            // Request permissions
+            requestPermissionForAlias("bluetooth", call, "bluetoothPermsCallback");
         }
-
-        try {
-            byte[] ntripBytes = Base64.decode(base64Data, Base64.DEFAULT);
-            implementation.writeToBluetoothDevice(ntripBytes);
-            call.resolve();
-        } catch (Exception e) {
-            call.reject("Error decoding NTRIP data: " + e.getMessage());
-        }
-
-
     }
+
+    @PermissionCallback
+    private void bluetoothPermsCallback(PluginCall call) {
+        JSObject ret = new JSObject();
+        if (getPermissionState("bluetooth") == PermissionState.GRANTED) {
+            ret.put("granted", true);
+        } else {
+            ret.put("granted", false);
+        }
+        call.resolve(ret);
+    }
+
+
 
 
     public void readGNSSBluetoothDataListeners() {
@@ -174,9 +273,14 @@ public class GnssServicePlugin  extends Plugin {
                 new OnBluetoothDataCallback.BluetoothReadingBytesCallback() {
                     @Override
                     public void success(byte[] bytes) {
+
+                        String base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP);
+
                         JSObject ret = new JSObject();
 
-                        ret.put("value", ret);
+                        ret.put("result", base64Data);
+
+                        ret.put("encode", "base64");
 
                         notifyListeners("readData", ret);
                     }
@@ -187,7 +291,9 @@ public class GnssServicePlugin  extends Plugin {
 
                         JSObject ret = new JSObject();
 
-                        ret.put("value", ret);
+                        ret.put("result", data);
+
+                        ret.put("encode", "base64");
 
                         notifyListeners("readRawData", ret);
                     }
@@ -333,28 +439,28 @@ public class GnssServicePlugin  extends Plugin {
         );
     }
 
-    @PluginMethod
-    public void checkPermissions(PluginCall call) {
-        // Check if granted
-        if (getPermissionState("bluetooth") == PermissionState.GRANTED) {
-            JSObject ret = new JSObject();
-            ret.put("granted", true);
-            call.resolve(ret);
-        } else {
-            // Request permissions
-            requestPermissionForAlias("bluetooth", call, "bluetoothPermsCallback");
-        }
-    }
 
-    @PermissionCallback
-    private void bluetoothPermsCallback(PluginCall call) {
-        JSObject ret = new JSObject();
-        if (getPermissionState("bluetooth") == PermissionState.GRANTED) {
-            ret.put("granted", true);
-        } else {
-            ret.put("granted", false);
+
+    @PluginMethod
+    public void sendNtripData(PluginCall call){
+
+
+        String base64Data = call.getString("data");
+
+        if (base64Data == null) {
+            call.reject("Missing 'data' parameter");
+            return;
         }
-        call.resolve(ret);
+
+        try {
+            byte[] ntripBytes = Base64.decode(base64Data, Base64.DEFAULT);
+            implementation.writeToBluetoothDevice(ntripBytes);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Error decoding NTRIP data: " + e.getMessage());
+        }
+
+
     }
 
 

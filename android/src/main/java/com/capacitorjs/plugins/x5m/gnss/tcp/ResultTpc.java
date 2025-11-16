@@ -44,6 +44,10 @@ public class ResultTpc {
         return encoding;
     }
 
+    public byte[] toBytes(){
+        return result.getBytes();
+    }
+
     // --- Métodos de utilidad (Opcionales pero recomendados) ---
 
     /**
